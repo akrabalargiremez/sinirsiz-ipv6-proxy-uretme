@@ -1,0 +1,156 @@
+Notlar:
+Farklı işletim sistemlerini ve sunucu konfigürasyonlarını deneyebilirsiniz, ben denemedim.
+Gereklilikler:
+Debian 9 Stretch işletim sistemini sahip sunucu.
+Minimum 1 GB RAM barındıran sunucu
+/64 IPv6 tahsis edilmiş sunucu (/48 için farklı bir .sh dosyası gerekiyor onu da veririm)
+SSH bağlantısını kurmak için Putty ya da Bitvasebenzeri bir program.
+Rotate kodları vs. de var ancak onları paylaşmıyorum, ücretli destek veririm o konuda.
+Yapılacaklar:
+
+Sunucumuz kurulduktan ve IPv6 tahsisi yapıldıktan sonra SSH bağlantısını kurup sunucuya giriyoruz.
+
+BİRÇOK ARKADAŞ BANA YAPAMADIKLARINA DAİR MESAJ ATTI. VAKİTSİZLİKTEN DOLAYI NE YAZIK Kİ BEN YARDIMCI OLAMIYORUM ANCAK DESTEK ALMAK İSTEYENLER @dbekir; ARKADAŞIMDAN YARDIM ALABİLİR. KENDİSİ SUNUCU FİRMASI, SUNUCU TİPİ ve DİĞER HER TÜRLÜ KONUDA SİZE YARDIMCI OLABİLİR.
+r10.net / https://www.r10.net/profil/110108-dbekir.html
+
+sudo su
+komutuyla root yetkisini alıyoruz
+
+ip addr
+komutuyla güncel IPv4 adresini ve IPv6 adresini alıyoruz. Ayrıca ağ bağdaştırıcısının adını da öğreniyoruz. "eth0, ens192" gibi isimler alır. Bunları bir yere not ediyoruz.
+
+nano /etc/security/limits.conf
+komutuyla sunucunun limitlerini belirleyen dosyaya giriş yapıyoruz. Eğer nano düzenleyici yoksa aşağıdaki komutu yazıp yükledikten sonra üstteki adımı uyguluyoruz.
+
+sudo apt-get install nano
+Açılan dosyanın en altına yön tuşları ile indikten sonra
+
+root      hard    nproc       500000
+root soft nproc 500000
+Bu değerleri girip CTRL + X komutunu kullanarak çıkış yapıyoruz. Çıkarken "kaydedilsin mi" diye sorar "Y" butonunu seçip ENTER'a basıyoruz.
+
+Çıktıktan sonra aşağıdaki kodları sırasıyla komut satırına yazıyoruz. Y/n çıkan adımları Y diyerek geçiyoruz.
+apt-get update
+apt-get install "gcc++" git make screen mc wget
+reboot
+apt install build-essential
+apt install git
+cd ~
+git clone https://github.com/DanielAdolfsson/ndppd.git
+cd ~/ndppd
+make all && make install
+
+Bu aşamaya kadar gelebildiysek
+nano /root/ndppd/ndppd.conf
+kodunu kullanarak NDPPD yapılandırma dosyasına giriyoruz.
+
+route-ttl 30000
+proxy eth0 {
+router no
+timeout 500
+ttl 30000
+rule 2a08:14c0:100:200::/64 {
+static
+}
+}
+
+Bu kodları dosyaya yapıştırıyoruz. Rule kısmından sonraki IPv6 adresini kendimizinkiyle değiştiriyoruz. Ayrıca proxy eth0 yazan yeri de eğer bağdaştırıcının adı farklıysa onunla değiştiriyoruz. CTRL + X deyip ENTER'a basarak çıkıyoruz.
+
+Sorun yok ise alttaki kodları da tek tek komut satırına işliyoruz.
+
+ndppd -d -c /root/ndppd/ndppd.conf
+cd ~
+git clone https://github.com/z3APA3A/3proxy.git
+cd 3proxy/
+make -f Makefile.Linux
+wget https://blog.vpsville.ru/uploads/random-ipv6_64-address-generator.sh
+nano ./random-ipv6_64-address-generator.sh
+
+Geldiğimiz bu düzenleme noktasında otomatik olarak IPv6 üretecek .sh dosyasını düzenliyoruz. Zaten içi dolu, biz sadece:
+
+MAXCOUNT kısmını kaç tane IP istiyorsak o sayıyla değiştiriyoruz.
+network kısmını IPv6 adresimizin :: den önceki kısmıyla değiştiriyoruz. CTRL+X ve ENTER ile kaydettikten sonra çıkıyoruz.
+
+chmod +x random-ipv6_64-address-generator.sh
+./random-ipv6_64-address-generator.sh > ip.list
+nano 3proxy.sh
+
+Bu yapılandırma dosyasında da 3Proxy'yi düzenliyoruz.
+#!/bin/bash
+ 
+echo daemon
+echo maxconn 100
+echo nscache 65536
+echo timeouts 1 5 30 60 180 1800 15 60
+echo setgid 65535
+echo setuid 65535
+echo flush
+echo auth strong
+echo users admin:CL:pass
+echo allow admin
+ 
+port=30000
+count=1
+for i in `cat ip.list`; do
+echo "proxy -6 -n -a -p$port -i185.118.66.204 -e$i"
+((port+=1))
+((count+=1))
+if [ $count -eq 10001 ]; then
+exit
+fi
+done
+
+Her şeyi silip yerine bu kodları ekliyoruz.
+users admin:CL: pass kısmı bize kullanıcı adı admin şifresi de pass olan proxy'ler yaratır.
+port= kısmıyla hangi porttan IP üretmeye başlaması gerektiğiniz söyleriz. 5000 IP istiyorsanız 30000 ile 34999 arasını kullanır gibi.
+185.118.66.204 kısmına kendi sunucunuzun IPv4 adresini yazmanız lazım.
+
+Bunları ayarladıktan sonra CTRL+X ve ENTER diyerek çıkıyoruz.
+
+chmod +x 3proxy.sh
+./3proxy.sh > 3proxy.cfg
+/root/3proxy/bin/3proxy /root/3proxy/3proxy.cfg
+nano /etc/sysctl.conf
+
+Bu yapılandırma dosyasına girdikten sonra en alta inip
+
+
+net.ipv6.conf.eth0.proxy_ndp=1
+net.ipv6.conf.all.proxy_ndp=1
+net.ipv6.conf.default.forwarding=1
+net.ipv6.conf.all.forwarding=1
+net.ipv6.ip_nonlocal_bind = 1
+
+kodlarını yazıyoruz. Eğer ağ bağdaştırıcısının adı farklı ise eth0'ı sunucudaki bağdaştırıcı ismiyle değiştirmeniz lazım. CTRL + X ve ENTER ile çıkıyoruz.
+sysctl -p
+ip -6 addr add 2a08:14c0:100:200::2/64 dev eth0 (NOT: :: kısmında öncesi güncel ipv6 adresi ile; eth0'da ağ bağdaştırıcısı ismi ile değiştirilecek)
+ip -6 route add default via 2a08:14c0:100:200::1 (NOT: :: öncesindeki kısım güncel ipv6 adresi ile değiştirilecek)
+ip -6 route add local 2a08:14c0:100:200::/64 dev lo
+
+(NOT: :: öncesindeki kısım güncel ipv6 adresi ile değiştirilecek)[/CODE]
+
+Bunları komut satırına yazınca bir tanesinde komut işlenemedi gibi uyarı almamız normal, devam ediyoruz.
+
+nano /etc/rc.local
+Buraya girdikten sonra şu uyarıya göre düzenlemenizi yaptıktan sonra
+
+NOT: Aşağıdaki komut parçacığının 4, 5 ve 6.satırlardaki kısımlar 29, 30 ve 31 adımlardaki güncellenmiş komutlar ile değiştirilecek)
+#!/bin/bash
+ulimit -n 500000
+ulimit -u 500000
+/sbin/ip -6 addr add 2a08:14c0:100:200::2/64 dev eth0
+/sbin/ip -6 route add default via 2a08:14c0:100:200::1
+/sbin/ip -6 route add local 2a08:14c0:100:200::/64 dev lo
+/root/ndppd/ndppd -d -c /root/ndppd/ndppd.conf
+/root/3proxy/bin/3proxy /root/3proxy/3proxy.cfg
+exit 0
+bu kodları dosyadaki tüm bilgileri silerek yerine kopyalayın. Adımlar olarak bahsettiğim yerin yukarıda nereye geldiğini anlarsınız zaten. CTRL + X ve ENTER diyerek çıkıyoruz.
+chmod +x /etc/rc.local
+systemctl enable rc-local.service
+systemctl start rc-local.service
+systemctl status rc-local.service
+reboot
+Sunucu yeniden başladığında IPv4:PORT şeklinde IPv6 çıktı veren proxy'ler elde edersiniz.
+
+çalışıp çalışmadığını kontrol etmek için
+netstat -tcp --listening --programs
